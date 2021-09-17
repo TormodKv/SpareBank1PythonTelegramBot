@@ -1,5 +1,5 @@
 from requests.models import Response
-from telegram import Update, message
+from telegram import Update
 import telegram
 from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler
 import secrets
@@ -7,7 +7,6 @@ import requests
 import threading
 import time
 from telegram.ext.filters import Filters
-import datetime
 
 baseURI = "https://api.sparebank1.no/open/personal/banking"
 bearer = secrets.get_bearer()
@@ -71,7 +70,7 @@ def stop_handler(update: Update, context: CallbackContext):
 
 def addchat_handler(update: Update, context: CallbackContext):
     chats.append(update.effective_chat)
-    update.message.reply_text("Added to watchlist!")
+    print("Added to watchlist!")
 
 
 def is_authorized_chat(chat : telegram.Chat):
