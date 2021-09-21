@@ -22,13 +22,13 @@ def start_balance_polling():
     while(True):
         time.sleep(100) # Time between each polling of bank API
         data = get_account_data(accountID)
-        if data != False and data["balance"]["amount"] != dataSnapshot["balance"]["amount"]:
+        if data != False and data["availableBalance"]["amount"] != dataSnapshot["availableBalance"]["amount"]:
             dataSnapshot = data
             chat : telegram.Chat
             for chat in chats:
                 if is_authorized_chat(chat):
                     try:
-                        updater.bot.send_message(chat.id, f'Updated Balance: {data["balance"]["amount"]} {data["balance"]["currencyCode"]}', disable_notification = True)
+                        updater.bot.send_message(chat.id, f'Updated Balance: {data["availableBalance"]["amount"]} {data["availableBalance"]["currencyCode"]}', disable_notification = True)
                     except:
                         print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
 
@@ -37,7 +37,7 @@ def balance_handler(update: Update, context: CallbackContext) -> None:
 
     try:
         if is_semi_authorized_user(update.effective_user.id) or is_authorized_chat(update.effective_chat):
-            update.message.reply_text(f'Balance: {dataSnapshot["balance"]["amount"]} {dataSnapshot["balance"]["currencyCode"]}')
+            update.message.reply_text(f'Balance: {dataSnapshot["availableBalance"]["amount"]} {dataSnapshot["availableBalance"]["currencyCode"]}')
         else:
             update.message.reply_text("Unauthorized")
     except:
@@ -49,7 +49,7 @@ def get_account_data(id):
         r : Response = requests.get(f'{baseURI}/accounts/{id}', headers={'Authorization': f'Bearer {bearer}'})
         print(f"Response status: {r.status_code}")
         data = r.json()
-        validateTest = data["balance"]["amount"]
+        validateTest = data["availableBalance"]["amount"]
         return data
     except:
         return False
@@ -58,7 +58,7 @@ def get_account_data(id):
 def added_to_group_handler(update: Update, context: CallbackContext):
     for member in update.message.new_chat_members:
         if member.username == secrets.get_bot_username():
-            chats.append(update.effective_chat)
+            addchat_handler(update, context)
 
 
 def stop_handler(update: Update, context: CallbackContext):
@@ -69,8 +69,11 @@ def stop_handler(update: Update, context: CallbackContext):
 
 
 def addchat_handler(update: Update, context: CallbackContext):
-    chats.append(update.effective_chat)
-    print("Added to watchlist!")
+    if (update.effective_chat not in chats):
+        chats.append(update.effective_chat)
+        print("Added to watchlist!")
+    else:
+        print("Chat already in watchlist!")
 
 
 def is_authorized_chat(chat : telegram.Chat):
