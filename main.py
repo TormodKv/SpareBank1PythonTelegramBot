@@ -1,11 +1,13 @@
+import datetime
 from requests.models import Response
-from telegram import Update
+from telegram import Update, ParseMode, poll
 import telegram
 from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler
 import secrets
 import requests
 import threading
 import time
+import re
 from telegram.ext.filters import Filters
 
 baseURI = "https://api.sparebank1.no/open/personal/banking"
@@ -14,45 +16,97 @@ accountID = secrets.get_account_id()
 adminIDs = [52507774] # Change to your own id(s)
 semiAdminIDs = [52507774]
 chats = []
-dataSnapshot = {}
+accountDataSnapshot = {}
+transactionSnapshot = {}
+
+payday=15
+paydayAmount = 9800
+
 
 def start_balance_polling():
-    global dataSnapshot
-    dataSnapshot = get_account_data(accountID)
+    global accountDataSnapshot
+    global transactionSnapshot
+
+    # Initialize
+    accountDataSnapshot = get_account_data()
+    transactionSnapshot = get_transaction_data()
+
     while(True):
-        time.sleep(100) # Time between each polling of bank API
-        data = get_account_data(accountID)
-        if data != False and data["availableBalance"]["amount"] != dataSnapshot["availableBalance"]["amount"]:
-            dataSnapshot = data
-            chat : telegram.Chat
-            for chat in chats:
-                if is_authorized_chat(chat):
-                    try:
-                        updater.bot.send_message(chat.id, f'Updated Balance: {data["availableBalance"]["amount"]} {data["availableBalance"]["currencyCode"]}', disable_notification = True)
-                    except:
-                        print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
+        time.sleep(60) # Time between each polling of bank API
+
+        accountData = get_account_data()
+        if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
+            transactionData = get_transaction_data()
+            if transactionData != False and (transactionData["amount"]["amount"] != transactionSnapshot["amount"]["amount"] and transactionData["description"] != transactionSnapshot["description"]):
+
+                accountDataSnapshot = accountData
+                transactionSnapshot = transactionData
+                chat : telegram.Chat
+                for chat in chats:
+                    if is_authorized_chat(chat):
+                        try:
+                            send_balance_message(chat.id)
+                        except:
+                            print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
 
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
-
     try:
         if is_semi_authorized_user(update.effective_user.id) or is_authorized_chat(update.effective_chat):
-            update.message.reply_text(f'Balance: {dataSnapshot["availableBalance"]["amount"]} {dataSnapshot["availableBalance"]["currencyCode"]}')
+            update.effective_chat.id
+            send_balance_message(update.effective_chat.id)
         else:
             update.message.reply_text("Unauthorized")
     except:
-        print("ERROR: Could not send manual message to chat")
+        print("ERROR: Could not send manual balance message to chat")
 
 
-def get_account_data(id):
+def get_account_data():
     try:
-        r : Response = requests.get(f'{baseURI}/accounts/{id}', headers={'Authorization': f'Bearer {bearer}'})
+        r : Response = requests.get(f'{baseURI}/accounts/{accountID}', headers={'Authorization': f'Bearer {bearer}'})
         print(f"Response status: {r.status_code}")
         data = r.json()
         validateTest = data["availableBalance"]["amount"]
         return data
     except:
         return False
+
+def get_transaction_data():
+    try:
+        r : Response = requests.get(f'{baseURI}/accounts/{accountID}/transactions', headers={'Authorization': f'Bearer {bearer}'})
+        print(f"Response status: {r.status_code}")
+        data = r.json()
+        validateTest = data["transactions"][0]["amount"]
+        return data
+    except:
+        return False
+
+
+def send_balance_message(chatId):
+    lastTransaction = transactionSnapshot["transactions"][0]
+
+    currentBalanceText = f'Current Balance: {accountDataSnapshot["availableBalance"]["amount"]} {accountDataSnapshot["availableBalance"]["currencyCode"]}'
+    expectedBalanceText = f'Expected Balance: {calculate_expected_balance()} {accountDataSnapshot["availableBalance"]["currencyCode"]}'
+    lastTransactionText = f'Last Transaction: {lastTransaction["amount"]["amount"]} {lastTransaction["amount"]["currencyCode"]}'
+    detailsText = f'Details: {lastTransaction["description"]}'
+
+    updater.bot.send_message(chatId, f'`{currentBalanceText}\n{expectedBalanceText}\n\n{lastTransactionText}\n{detailsText}\n`', disable_notification = True, parse_mode = ParseMode.MARKDOWN)
+
+
+def calculate_expected_balance():
+    now = datetime.datetime.now()
+    start = datetime.datetime(now.year, now.month-1, payday, 0, 0, 0)
+    end = datetime.datetime(now.year, now.month, payday, 0, 0, 0)
+
+    if now.day >= payday:
+        start = datetime.datetime(now.year, now.month, payday, 0, 0, 0)
+        end = datetime.datetime(now.year, now.month+1, payday, 0, 0, 0)
+
+    totalSeconds = (end-start).total_seconds()
+    partialSeconds = (end-now).total_seconds()
+
+    return round((partialSeconds * paydayAmount) / totalSeconds, 2)
+    
 
 
 def added_to_group_handler(update: Update, context: CallbackContext):
@@ -62,10 +116,11 @@ def added_to_group_handler(update: Update, context: CallbackContext):
 
 
 def stop_handler(update: Update, context: CallbackContext):
+
     if is_authorized_user(update.effective_user.id):
+        update.message.reply_text("Shutting down...")
         updater.stop()
-        import sys
-        sys.exit()
+
 
 
 def addchat_handler(update: Update, context: CallbackContext):
@@ -98,7 +153,20 @@ def is_semi_authorized_user(id):
 
 
 global add_semi_admin_handler_bool
-add_semi_admin_handler_bool = True
+add_semi_admin_handler_bool = False
+
+global set_expected_balance_amount_handler_bool
+set_expected_balance_amount_handler_bool = False
+
+global set_payday_bool
+set_payday_bool = False
+
+
+def set_payday(update: Update, context: CallbackContext):
+    if is_authorized_user(update.effective_user.id):
+        global set_payday_bool
+        set_payday_bool = True
+        update.message.reply_text(f"Current payday: {payday}\nSet the payday of the month:")
 
 
 def add_semi_admin_handler(update: Update, context: CallbackContext):
@@ -106,6 +174,36 @@ def add_semi_admin_handler(update: Update, context: CallbackContext):
         global add_semi_admin_handler_bool
         add_semi_admin_handler_bool = True
         update.message.reply_text("Share contact to add semi admin")
+
+
+def set_expected_balance_handler(update: Update, context: CallbackContext):
+    if is_authorized_user(update.effective_user.id):
+        global set_expected_balance_amount_handler_bool
+        set_expected_balance_amount_handler_bool = True
+        update.message.reply_text(f"Current max balance: {paydayAmount} NOK\nSend new expected max balance:")
+
+
+def number_handler(update: Update, context: CallbackContext):
+    if is_authorized_user(update.effective_user.id):
+        global set_expected_balance_amount_handler_bool
+        global paydayAmount
+        global set_payday_bool
+        global payday
+        if set_expected_balance_amount_handler_bool:
+            set_expected_balance_amount_handler_bool = False
+            matches = re.findall(r"[0-9]+", update.message.text)
+            if len(matches) > 0:
+                paydayAmount = int(matches[0])
+            update.message.reply_text(f"Updated current max balance: {paydayAmount} NOK")
+
+        elif set_payday_bool:
+            set_payday_bool = False
+            matches = re.findall(r"[0-9]+", update.message.text)
+            if len(matches) > 0:
+                x = int(matches[0])
+                if x <= 28 and x >= 0:
+                    payday = x
+            update.message.reply_text(f"Updated current payday: {payday}")
 
 
 def contact_handler(update: Update, context: CallbackContext):
@@ -118,7 +216,7 @@ def contact_handler(update: Update, context: CallbackContext):
 
 
 def help_handler(update: Update, context: CallbackContext):
-    update.message.reply_text(f"/balance : See account balance.\n\n/stop : Stop the bot.\n\n/addToWatchList : Add the current chat to list that gets balance updates.\n\n/addSemiAdmin : Give rights to someone to use the bot outside of an authorized chat")
+    update.message.reply_text(f"/balance : See account balance.\n\n/stop : Stop the bot.\n\n/addToWatchList : Add the current chat to list that gets balance updates.\n\n/addSemiAdmin : Give rights to someone to use the bot outside of an authorized chat\n\n/setExpectedBalanceAmount : Set the realistic max amount the account will have on the payday\n\n/setPayday : set the day the account gets filled and the countdown starts again")
 
 
 updater = Updater(secrets.get_telegram_api_key())
@@ -129,11 +227,14 @@ updater.dispatcher.add_handler(CommandHandler('help', help_handler))
 updater.dispatcher.add_handler(CommandHandler('start', help_handler))
 updater.dispatcher.add_handler(CommandHandler('addToWatchList', addchat_handler))
 updater.dispatcher.add_handler(CommandHandler('addSemiAdmin', add_semi_admin_handler))
+updater.dispatcher.add_handler(CommandHandler('setExpectedBalanceAmount', set_expected_balance_handler))
+updater.dispatcher.add_handler(CommandHandler('setPayday', set_payday))
 updater.dispatcher.add_handler(MessageHandler(Filters.contact, contact_handler))
 updater.dispatcher.add_handler(MessageHandler(Filters.status_update.new_chat_members, added_to_group_handler))
+updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[0-9]'), number_handler))
 
-t = threading.Thread(name='balance_polling_loop', target=start_balance_polling)
-t.start()
+pollingThread = threading.Thread(name='balance_polling_loop', target=start_balance_polling)
+pollingThread.start()
 
 print("Starting telegram polling...")
 updater.start_polling()
