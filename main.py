@@ -101,7 +101,12 @@ def calculate_expected_balance():
 
     if now.day >= payday:
         start = datetime.datetime(now.year, now.month, payday, 0, 0, 0)
-        end = datetime.datetime(now.year, now.month+1, payday, 0, 0, 0)
+        nextmonth = now.month + 1
+        year = now.year
+        if nextmonth >= 13:
+            nextmonth = 1
+            year += 1
+        end = datetime.datetime(year, nextmonth, payday, 0, 0, 0)
 
     totalSeconds = (end-start).total_seconds()
     partialSeconds = (end-now).total_seconds()
