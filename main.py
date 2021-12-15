@@ -35,21 +35,24 @@ def start_balance_polling():
         time.sleep(60) # Time between each polling of bank API
 
         accountData = get_account_data()
-        if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
-            transactionData = get_transaction_data()
-            print(f"New transaction data:\n{transactionData}\n")
-            print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
-            if transactionData != False and (transactionData["amount"]["amount"] != transactionSnapshot["amount"]["amount"] and transactionData["description"] != transactionSnapshot["description"]):
+        try:
+            if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
+                transactionData = get_transaction_data()
+                print(f"New transaction data:\n{transactionData}\n")
+                print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
+                if transactionData["amount"]["amount"] != transactionSnapshot["amount"]["amount"] and transactionData["description"] != transactionSnapshot["description"]:
 
-                accountDataSnapshot = accountData
-                transactionSnapshot = transactionData
-                chat : telegram.Chat
-                for chat in chats:
-                    if is_authorized_chat(chat):
-                        try:
-                            send_balance_message(chat.id)
-                        except:
-                            print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
+                    accountDataSnapshot = accountData
+                    transactionSnapshot = transactionData
+                    chat : telegram.Chat
+                    for chat in chats:
+                        if is_authorized_chat(chat):
+                            try:
+                                send_balance_message(chat.id)
+                            except:
+                                print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
+        except:
+            print("Faulty transaction data: " + transactionData)
 
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
