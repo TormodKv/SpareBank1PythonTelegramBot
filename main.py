@@ -35,30 +35,26 @@ def start_balance_polling():
         time.sleep(60) # Time between each polling of bank API
 
         accountData = get_account_data()
-        try:
-            if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
-                transactionData = get_transaction_data()
-                print(f"New transaction data:\n{transactionData}\n")
-                print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
-                if transactionData["amount"]["amount"] != transactionSnapshot["amount"]["amount"] and transactionData["description"] != transactionSnapshot["description"]:
+        if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
+            transactionData = get_transaction_data()
+            print(f"New transaction data:\n{transactionData}\n")
+            print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
+            if transactionData != False and (transactionData["amount"]["amount"] != transactionSnapshot["amount"]["amount"] and transactionData["description"] != transactionSnapshot["description"]):
 
-                    accountDataSnapshot = accountData
-                    transactionSnapshot = transactionData
-                    chat : telegram.Chat
-                    for chat in chats:
-                        if is_authorized_chat(chat):
-                            try:
-                                send_balance_message(chat.id)
-                            except:
-                                print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
-        except:
-            print("Faulty transaction data: " + transactionData)
+                accountDataSnapshot = accountData
+                transactionSnapshot = transactionData
+                chat : telegram.Chat
+                for chat in chats:
+                    if is_authorized_chat(chat):
+                        try:
+                            send_balance_message(chat.id)
+                        except:
+                            print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
 
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
     try:
         if is_semi_authorized_user(update.effective_user.id) or is_authorized_chat(update.effective_chat):
-            update.effective_chat.id
             send_balance_message(update.effective_chat.id)
         else:
             update.message.reply_text("Unauthorized")
@@ -99,7 +95,13 @@ def send_balance_message(chatId):
 
 def calculate_expected_balance():
     now = datetime.datetime.now()
-    start = datetime.datetime(now.year, now.month-1, payday, 0, 0, 0)
+    startYear = now.year
+    startMonth = now.month - 1
+    if startMonth == 0:
+        startMonth = 12
+        startYear -= 1
+    
+    start = datetime.datetime(startYear, startMonth, payday, 0, 0, 0)
     end = datetime.datetime(now.year, now.month, payday, 0, 0, 0)
 
     if now.day >= payday:
