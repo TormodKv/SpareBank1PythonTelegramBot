@@ -20,7 +20,7 @@ accountDataSnapshot = {}
 transactionSnapshot = {}
 
 payday=15
-paydayAmount = 9800
+paydayAmount = 8400
 
 
 def start_balance_polling():
@@ -39,7 +39,7 @@ def start_balance_polling():
             transactionData = get_transaction_data()
             print(f"New transaction data:\n{transactionData}\n")
             print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
-            if transactionData != False and (transactionData["amount"]["amount"] != transactionSnapshot["amount"]["amount"] and transactionData["description"] != transactionSnapshot["description"]):
+            if transactionData != False and not is_equal_transactions(transactionData, transactionSnapshot):
 
                 accountDataSnapshot = accountData
                 transactionSnapshot = transactionData
@@ -51,6 +51,9 @@ def start_balance_polling():
                         except:
                             print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
 
+def is_equal_transactions(o1: object, o2: object):
+    return o1["archiveReference"] == o2["archiveReference"]
+    
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
     try:
