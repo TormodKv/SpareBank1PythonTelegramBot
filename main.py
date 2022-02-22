@@ -17,7 +17,7 @@ adminIDs = [52507774] # Change to your own id(s)
 semiAdminIDs = [52507774]
 chats = []
 accountDataSnapshot = {}
-transactionSnapshot = {}
+transactionSnapshot = []
 
 payday=15
 paydayAmount = 8400
@@ -29,14 +29,14 @@ def start_balance_polling():
 
     # Initialize
     accountDataSnapshot = get_account_data()
-    transactionSnapshot = get_transaction_data()
+    transactionSnapshot = get_all_transaction_data()
 
     while(True):
-        time.sleep(60) # Time between each polling of bank API
+        time.sleep(120) # Time between each polling of bank API
 
         accountData = get_account_data()
         if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
-            transactionData = get_transaction_data()
+            transactionData = get_all_transaction_data()
             print(f"New transaction data:\n{transactionData}\n")
             print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
             if transactionData != False and not is_equal_transactions(transactionData, transactionSnapshot):
@@ -51,8 +51,10 @@ def start_balance_polling():
                         except:
                             print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
 
-def is_equal_transactions(o1: object, o2: object):
-    return o1["archiveReference"] == o2["archiveReference"]
+def is_equal_transactions(o1, o2):
+    print(o1)
+    print(o2)
+    return o1 == o2
     
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
@@ -77,11 +79,18 @@ def get_account_data():
 
 def get_transaction_data():
     try:
+        return get_all_transaction_data()[0]
+    except:
+        return False
+    
+    
+def get_all_transaction_data():
+    try:
         r : Response = requests.get(f'{baseURI}/accounts/{accountID}/transactions', headers={'Authorization': f'Bearer {bearer}'})
         print(f"Response status: {r.status_code}")
         data = r.json()
         validateTest = data["transactions"][0]["amount"]
-        return data["transactions"][0]
+        return data["transactions"]
     except:
         return False
 
@@ -90,8 +99,8 @@ def send_balance_message(chatId):
 
     currentBalanceText = f'Current Balance: {accountDataSnapshot["availableBalance"]["amount"]} {accountDataSnapshot["availableBalance"]["currencyCode"]}'
     expectedBalanceText = f'Expected Balance: {calculate_expected_balance()} {accountDataSnapshot["availableBalance"]["currencyCode"]}'
-    lastTransactionText = f'Last Transaction: {transactionSnapshot["amount"]["amount"]} {transactionSnapshot["amount"]["currencyCode"]}'
-    detailsText = f'Details: {transactionSnapshot["description"]}'
+    lastTransactionText = f'Last Transaction: {transactionSnapshot[0]["amount"]["amount"]} {transactionSnapshot[0]["amount"]["currencyCode"]}'
+    detailsText = f'Details: {transactionSnapshot[0]["description"]}'
 
     updater.bot.send_message(chatId, f'`{currentBalanceText}\n{expectedBalanceText}\n\n{lastTransactionText}\n{detailsText}\n`', disable_notification = True, parse_mode = ParseMode.MARKDOWN)
 
@@ -143,6 +152,8 @@ def addchat_handler(update: Update, context: CallbackContext):
         print("Added to watchlist!")
     else:
         print("Chat already in watchlist!")
+    updater.bot.deleteMessage(update.effective_chat.id, update.message.message_id)
+
 
 
 def is_authorized_chat(chat : telegram.Chat):
