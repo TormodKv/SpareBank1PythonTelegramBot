@@ -10,7 +10,7 @@ import time
 import re
 from telegram.ext.filters import Filters
 
-baseURI = "https://api.sparebank1.no/open/personal/banking"
+baseURI = "https://api.sparebank1.no/personal/banking"
 bearer = secrets.get_bearer()
 accountID = secrets.get_account_id()
 adminIDs = [52507774] # Change to your own id(s)
@@ -35,10 +35,10 @@ def start_balance_polling():
         time.sleep(120) # Time between each polling of bank API
 
         accountData = get_account_data()
-        if accountData != False and accountData["availableBalance"]["amount"] != accountDataSnapshot["availableBalance"]["amount"]:
+        if accountData != False and accountData["availableBalance"] != accountDataSnapshot["availableBalance"]:
             transactionData = get_all_transaction_data()
             print(f"New transaction data:\n{transactionData}\n")
-            print(f"Transaction data snapshot:\n{transactionSnapshot}\n")
+            print(f"Transaction data snapshot:\n{transactionSnapshot[0]}\n")
             if transactionData != False and not is_equal_transactions(transactionData, transactionSnapshot):
 
                 accountDataSnapshot = accountData
@@ -69,10 +69,10 @@ def balance_handler(update: Update, context: CallbackContext) -> None:
 
 def get_account_data():
     try:
-        r : Response = requests.get(f'{baseURI}/accounts/{accountID}', headers={'Authorization': f'Bearer {bearer}'})
+        r : Response = requests.get(f'{baseURI}/accounts/{accountID}', headers={'Authorization': f'Bearer {bearer}', 'Content-Type': 'application/vnd.sparebank1.v5+json', 'Accept':'application/vnd.sparebank1.v5+json'})
         print(f"Response status: {r.status_code}")
         data = r.json()
-        validateTest = data["availableBalance"]["amount"]
+        validateTest = data["availableBalance"] > -1
         return data
     except:
         return False
@@ -86,10 +86,10 @@ def get_transaction_data():
     
 def get_all_transaction_data():
     try:
-        r : Response = requests.get(f'{baseURI}/accounts/{accountID}/transactions', headers={'Authorization': f'Bearer {bearer}'})
+        r : Response = requests.get(f'{baseURI}/transactions?accountKey={accountID}', headers={'Authorization': f'Bearer {bearer}', 'Content-Type': 'application/vnd.sparebank1.v1+json', 'Accept':'application/vnd.sparebank1.v1+json'})
         print(f"Response status: {r.status_code}")
         data = r.json()
-        validateTest = data["transactions"][0]["amount"]
+        validateTest = data["transactions"][0]["amount"] > 0
         return data["transactions"]
     except:
         return False
@@ -97,9 +97,10 @@ def get_all_transaction_data():
 
 def send_balance_message(chatId):
 
-    currentBalanceText = f'Current Balance: {accountDataSnapshot["availableBalance"]["amount"]} {accountDataSnapshot["availableBalance"]["currencyCode"]}'
-    expectedBalanceText = f'Expected Balance: {calculate_expected_balance()} {accountDataSnapshot["availableBalance"]["currencyCode"]}'
-    lastTransactionText = f'Last Transaction: {transactionSnapshot[0]["amount"]["amount"]} {transactionSnapshot[0]["amount"]["currencyCode"]}'
+    currentBalanceText = f'Current Balance: {accountDataSnapshot["availableBalance"]} {accountDataSnapshot["currencyCode"]}'
+    expectedBalanceText = f'Expected Balance: {calculate_expected_balance()} {accountDataSnapshot["currencyCode"]}'
+    lastTransactionText = f'Last Transaction: {transactionSnapshot[0]["amount"]} {transactionSnapshot[0]["currencyCode"]}'
+    #date = f'Date: {datetime.utcfromtimestamp(transactionSnapshot[0]["date"]).strftime("%Y-%m-%d %H:%M")}'
     detailsText = f'Details: {transactionSnapshot[0]["description"]}'
 
     updater.bot.send_message(chatId, f'`{currentBalanceText}\n{expectedBalanceText}\n\n{lastTransactionText}\n{detailsText}\n`', disable_notification = True, parse_mode = ParseMode.MARKDOWN)
