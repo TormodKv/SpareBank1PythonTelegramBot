@@ -1,6 +1,6 @@
 import datetime
 from requests.models import Response
-from telegram import Update, ParseMode, chat, message, poll
+from telegram import Update, ParseMode
 import telegram
 from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler
 import secrets
@@ -15,12 +15,13 @@ bearer = secrets.get_bearer()
 accountID = secrets.get_account_id()
 adminIDs = [52507774] # Change to your own id(s)
 semiAdminIDs = [52507774]
+sleepTime = 20
 chats = []
 accountDataSnapshot = {}
 transactionSnapshot = []
 
 payday=15
-paydayAmount = 8400
+paydayAmount = 12600
 
 
 def start_balance_polling():
@@ -32,17 +33,15 @@ def start_balance_polling():
     transactionSnapshot = get_all_transaction_data()
 
     while(True):
-        time.sleep(120) # Time between each polling of bank API
+        time.sleep(sleepTime)
 
-        accountData = get_account_data()
-        if accountData != False and accountData["availableBalance"] != accountDataSnapshot["availableBalance"]:
-            transactionData = get_all_transaction_data()
-            print(f"New transaction data:\n{transactionData}\n")
-            print(f"Transaction data snapshot:\n{transactionSnapshot[0]}\n")
-            if transactionData != False and not is_equal_transactions(transactionData, transactionSnapshot):
+        newAccountData = get_account_data()
+        if newAccountData != False and newAccountData["availableBalance"] != accountDataSnapshot["availableBalance"]:
+            newTransactionData = get_all_transaction_data()
+            if newTransactionData != False and not is_equal_transaction_lists(newTransactionData, transactionSnapshot):
 
-                accountDataSnapshot = accountData
-                transactionSnapshot = transactionData
+                accountDataSnapshot = get_account_data()
+                transactionSnapshot = newTransactionData
                 chat : telegram.Chat
                 for chat in chats:
                     if is_authorized_chat(chat):
@@ -51,10 +50,15 @@ def start_balance_polling():
                         except:
                             print("ERROR: Could not send automatic message to chat. Is the bot a member in the chat?")
 
-def is_equal_transactions(o1, o2):
-    print(o1)
-    print(o2)
-    return o1 == o2
+def is_equal_transaction_lists(o1, o2):
+    # Here we can't just compare the objects because every transaction gets a new ID per api call
+    o1Length = len(o1)
+    o2Length = len(o2)
+    o1FirstAmout = o1[0]["amount"]
+    o2FirstAmout = o2[0]["amount"]
+    o1LastAmout = o1[o1Length-1]["amount"]
+    o2LastAmout = o2[o2Length-1]["amount"]
+    return o1Length == o2Length and o1FirstAmout == o2FirstAmout and o1LastAmout == o2LastAmout
     
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
@@ -208,6 +212,12 @@ def set_expected_balance_handler(update: Update, context: CallbackContext):
         set_expected_balance_amount_handler_bool = True
         update.message.reply_text(f"Current max balance: {paydayAmount} NOK\nSend new expected max balance:")
 
+def refresh(update: Update, context: CallbackContext):
+    if is_authorized_user(update.effective_user.id):
+        global accountDataSnapshot
+        accountDataSnapshot = get_account_data()
+        global transactionSnapshot 
+        transactionSnapshot = get_all_transaction_data()
 
 def number_handler(update: Update, context: CallbackContext):
     if is_authorized_user(update.effective_user.id):
@@ -269,7 +279,7 @@ def remove_watch_list_chat_by_id(update: Update, context: CallbackContext):
 
 
 def help_handler(update: Update, context: CallbackContext):
-    update.message.reply_text(f"/balance : See account balance.\n\n/stop : Stop the bot.\n\n/addToWatchList : Add the current chat to list that gets balance updates.\n\n/addSemiAdmin : Give rights to someone to use the bot outside of an authorized chat\n\n/setExpectedBalanceAmount : Set the realistic max amount the account will have on the payday\n\n/setPayday : set the day the account gets filled and the countdown starts again\n\n/getWatchListChats : Gets all the chats thats on the watchlist\n\n/removeWatchListChatByID : Removes the watchlist chat by given id")
+    update.message.reply_text(f"/balance : See account balance.\n\n/stop : Stop the bot.\n\n/addToWatchList : Add the current chat to list that gets balance updates.\n\n/addSemiAdmin : Give rights to someone to use the bot outside of an authorized chat\n\n/setExpectedBalanceAmount : Set the realistic max amount the account will have on the payday\n\n/setPayday : set the day the account gets filled and the countdown starts again\n\n/getWatchListChats : Gets all the chats thats on the watchlist\n\n/removeWatchListChatByID : Removes the watchlist chat by given id\n\n/refresh : Gets fresh data from the API")
 
 
 updater = Updater(secrets.get_telegram_api_key())
@@ -284,6 +294,7 @@ updater.dispatcher.add_handler(CommandHandler('setExpectedBalanceAmount', set_ex
 updater.dispatcher.add_handler(CommandHandler('setPayday', set_payday))
 updater.dispatcher.add_handler(CommandHandler('getWatchListChats', get_watchlist_chats))
 updater.dispatcher.add_handler(CommandHandler('removeWatchListChatByID', remove_watch_list_chat_by_id))
+updater.dispatcher.add_handler(CommandHandler('refresh', refresh))
 updater.dispatcher.add_handler(MessageHandler(Filters.contact, contact_handler))
 updater.dispatcher.add_handler(MessageHandler(Filters.status_update.new_chat_members, added_to_group_handler))
 updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[0-9]'), number_handler))
