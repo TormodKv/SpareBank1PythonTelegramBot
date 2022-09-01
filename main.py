@@ -13,15 +13,15 @@ from telegram.ext.filters import Filters
 baseURI = "https://api.sparebank1.no/personal/banking"
 bearer = secrets.get_bearer()
 accountID = secrets.get_account_id()
-adminIDs = [52507774] # Change to your own id(s)
-semiAdminIDs = [52507774]
-sleepTime = 20
+adminIDs = [52507774, 1551390] # Change to your own id(s)
+semiAdminIDs = [52507774, 1551390]
+sleepTime = 200
 chats = []
 accountDataSnapshot = {}
 transactionSnapshot = []
 
 payday=15
-paydayAmount = 12600
+paydayAmount = 14000
 
 
 def start_balance_polling():
@@ -54,11 +54,11 @@ def is_equal_transaction_lists(o1, o2):
     # Here we can't just compare the objects because every transaction gets a new ID per api call
     o1Length = len(o1)
     o2Length = len(o2)
-    o1FirstAmout = o1[0]["amount"]
-    o2FirstAmout = o2[0]["amount"]
-    o1LastAmout = o1[o1Length-1]["amount"]
-    o2LastAmout = o2[o2Length-1]["amount"]
-    return o1Length == o2Length and o1FirstAmout == o2FirstAmout and o1LastAmout == o2LastAmout
+    o1FirstAmount = o1[0]["amount"]
+    o2FirstAmount = o2[0]["amount"]
+    o1LastAmount = o1[o1Length-1]["amount"]
+    o2LastAmount = o2[o2Length-1]["amount"]
+    return o1Length == o2Length and o1FirstAmount == o2FirstAmount and o1LastAmount == o2LastAmount
     
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
@@ -152,13 +152,19 @@ def stop_handler(update: Update, context: CallbackContext):
 
 
 def addchat_handler(update: Update, context: CallbackContext):
-    if (update.effective_chat not in chats):
+    if (update.effective_chat not in chats and is_authorized_chat(update.effective_chat)):
         chats.append(update.effective_chat)
         print("Added to watchlist!")
+        updater.bot.deleteMessage(update.effective_chat.id, update.message.message_id)
     else:
-        print("Chat already in watchlist!")
+        print("Couldn't add chat to watchlist!")
     updater.bot.deleteMessage(update.effective_chat.id, update.message.message_id)
 
+
+def anything_handler(update: Update, context: CallbackContext):
+    if (update.effective_chat not in chats and is_authorized_chat(update.effective_chat) and update.effective_chat != None):
+        chats.append(update.effective_chat)
+        print("Added to watchlist!")
 
 
 def is_authorized_chat(chat : telegram.Chat):
@@ -169,7 +175,7 @@ def is_authorized_chat(chat : telegram.Chat):
                 print(f"Groupchat: {chat.title} is Authorized")
                 return True
         except:
-            return False
+            continue
 
     print(f"Groupchat: {chat.title} is Unauthorized")
     return False
@@ -298,6 +304,7 @@ updater.dispatcher.add_handler(CommandHandler('refresh', refresh))
 updater.dispatcher.add_handler(MessageHandler(Filters.contact, contact_handler))
 updater.dispatcher.add_handler(MessageHandler(Filters.status_update.new_chat_members, added_to_group_handler))
 updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[0-9]'), number_handler))
+updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'(\S|\s)*'), anything_handler))
 
 pollingThread = threading.Thread(name='balance_polling_loop', target=start_balance_polling)
 pollingThread.start()
