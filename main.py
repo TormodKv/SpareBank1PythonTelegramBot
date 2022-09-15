@@ -12,39 +12,44 @@ import json
 baseURI = "https://api.sparebank1.no/personal/banking"
 accessTokenUri = "https://api-auth.sparebank1.no/oauth/token"
 adminIDs = [52507774, 1551390] # Change to your own id(s)
-sleepTime = 60
+sleepTime = 250
 
 def start_balance_polling(userId):
 
-    refresh_access_token(userId)
+    # Get fresh refresh token
+    data = refresh_access_token(userId)
     refreshAccessToken = False
 
+    data["accountDataSnapshot"] = get_account_data(userId, data)
+    data["transactionSnapshot"] = get_all_transaction_data(userId, data)
+    write_json(userId, data)
+
+    # Polling loop
     while(True):
         time.sleep(sleepTime)
 
-        data = get_json(userId)
+        data = {}
 
         if refreshAccessToken:
-            refresh_access_token(userId)
+            data = refresh_access_token(userId)
             refreshAccessToken = False
         else:
             refreshAccessToken = True
+            data = data = get_json(userId)
 
-        newAccountData = get_account_data(userId)
+        newAccountData = get_account_data(userId, data)
         if newAccountData != False and newAccountData["availableBalance"] != data["accountDataSnapshot"]["availableBalance"]:
-            newTransactionData = get_all_transaction_data(userId)
+            newTransactionData = get_all_transaction_data(userId, data)
             if newTransactionData != False and not is_equal_transaction_lists(newTransactionData, data["transactionSnapshot"]):
 
                 data["accountDataSnapshot"] = newAccountData
                 data["transactionSnapshot"] = newTransactionData
                 write_json(userId, data)
-                chat : telegram.Chat
                 for chat in data["chats"]:
-                    if is_authorized_chat(chat) and str(chat.id) != "-642864988": #TODO remove this
-                        try:
-                            send_balance_message(chat.id, userId)
-                        except:
-                            print("ERROR: Could not send automatic message to chat")
+                    try:
+                        send_balance_message(chat.id, userId, data)
+                    except:
+                        print("ERROR: Could not send automatic message to chat")
 
 def is_equal_transaction_lists(o1, o2):
     # Here we can't just compare the objects because every transaction gets a new ID per api call
@@ -71,15 +76,15 @@ def balance_handler(update: Update, context: CallbackContext) -> None:
         print("ERROR: Could not send manual balance message to chat")
 
 
-def get_account_data(userId):
+def get_account_data(userId: str, passedData : object | None = None):
 
-    data = get_json(userId)
+    data = get_json(userId, passedData)
     accountId = data["accountId"]
     accessToken = data["accessToken"]
 
     try:
-        r : Response = requests.get(f'{baseURI}/accounts/{accountId}', headers={'Authorization': f'Bearer {accessToken}', 'Accept':'application/vnd.sparebank1.v1+json; charset=utf-8'})
-        print(f"Response status: {r.status_code}")
+        r : Response = requests.get(f'{baseURI}/accounts/{accountId}', headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v5+json'})
+        print(f"Get account data status: {r.status_code}")
         data = r.json()
         validateTest = data["availableBalance"] > -1
         return data
@@ -93,53 +98,57 @@ def get_transaction_data(userId):
         return False
     
     
-def get_all_transaction_data(userId):
+def get_all_transaction_data(userId: str, passedData : object | None = None):
     try:
-        data = get_json(userId)
+        data = get_json(userId, passedData)
         accountId = data["accountId"]
         accessToken = data["accessToken"]
 
-        r : Response = requests.get(f'{baseURI}/transactions?accountKey={accountId}', headers={'Authorization': f'Bearer {accessToken}', 'Accept':'application/vnd.sparebank1.v1+json; charset=utf-8'})
-        print(f"Response status: {r.status_code}")
+        r : Response = requests.get(f'{baseURI}/transactions?accountKey={accountId}', headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v1+json'})
+        print(f"Get transactions status: {r.status_code}")
         data = r.json()
         validateTest = data["transactions"][0]["amount"] > 0
         return data["transactions"]
     except:
         return False
 
-def refresh_access_token(userId):
-    data = get_json(userId)
-    requestBody = {
-        'client_id': data['clientId'],
-        'client_secret': data['clientSecret'], 
-        'refresh_token': data['refreshToken'], 
-        'grant_type': 'refresh_token',
-    }
-    r : Response = requests.post(accessTokenUri, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=requestBody)
-    jsonResponse = r.json()
-    data['accessToken'] = jsonResponse["access_token"]
-    data['refreshToken'] = jsonResponse["refresh_token"]
-    write_json(userId, data)
-    print(f"New access token status: {r.status_code}")
+def refresh_access_token(userId: str, passedData : object | None = None):
+    try:
+        data = get_json(userId, passedData)
+        requestBody = {
+            'client_id': data['clientId'],
+            'client_secret': data['clientSecret'], 
+            'refresh_token': data['refreshToken'], 
+            'grant_type': 'refresh_token',
+        }
+        r : Response = requests.post(accessTokenUri, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=requestBody)
+        jsonResponse = r.json()
+        data['accessToken'] = jsonResponse["access_token"]
+        data['refreshToken'] = jsonResponse["refresh_token"]
+        write_json(userId, data)
+        print(f"New access token status: {r.status_code}")
+        return data
+    except:
+        print("Couldn't get refresh token")
 
-def send_balance_message(chatId, userId):
+def send_balance_message(chatId, userId: str, passedData : object | None = None):
 
-    data = get_json(userId)
+    data = get_json(userId, passedData)
     accountDataSnapshot = data['accountDataSnapshot']
     transactionSnapshot = data['transactionSnapshot']
 
     currentBalanceText = f'Current Balance: {accountDataSnapshot["availableBalance"]} {accountDataSnapshot["currencyCode"]}'
-    expectedBalanceText = f'Expected Balance: {calculate_expected_balance(userId)} {accountDataSnapshot["currencyCode"]}'
+    expectedBalanceText = f'Expected Balance: {calculate_expected_balance(userId, data)} {accountDataSnapshot["currencyCode"]}'
     lastTransactionText = f'Last Transaction: {transactionSnapshot[0]["amount"]} {transactionSnapshot[0]["currencyCode"]}'
     detailsText = f'Details: {transactionSnapshot[0]["description"]}'
 
     updater.bot.send_message(chatId, f'`{currentBalanceText}\n{expectedBalanceText}\n\n{lastTransactionText}\n{detailsText}\n`', disable_notification = True, parse_mode = ParseMode.MARKDOWN)
 
 
-def calculate_expected_balance(userId):
+def calculate_expected_balance(userId: str, passedData : object | None = None):
 
-    data = get_json(userId)
-    payday = data["payday"]
+    data = get_json(userId, passedData)
+    payday = data["payDay"]
     paydayAmount = data["paydayAmount"]
 
     now = datetime.datetime.now()
@@ -169,14 +178,23 @@ def calculate_expected_balance(userId):
 def added_to_group_handler(update: Update, context: CallbackContext):
     anything_handler(update, context)
 
-def get_json(userId):
-    f = open(userId + '.json')
-    data = json.load(f)
-    f.close()
-    return data
+def get_json(userId: str, passedData : object | None = None):
+
+    if passedData != None:
+        return passedData
+    try:
+        f = open(str(userId) + '.json')
+        data = json.load(f)
+        f.close()
+        if len(data["refreshToken"]) > 0:
+            print("JSON file read")
+            return data
+        return None
+    except:
+        return None
 
 def write_json(userId, data):
-    with open(userId + ".json", "w") as outfile:
+    with open(str(userId) + ".json", "w") as outfile:
         json.dump(data, outfile)
         outfile.close()
 
@@ -184,9 +202,9 @@ def write_json(userId, data):
 def anything_handler(update: Update, context: CallbackContext):
     userId = is_authorized_chat(update.effective_chat)
     if (userId != False and update.effective_chat != None):
-        data = get_json(userId)
-        if update.effective_chat not in data["chats"]:
-            data["chats"].append(update.effective_chat)
+        data = get_json(str(userId))
+        if update.effective_chat.id not in data["chats"]:
+            data["chats"].append(update.effective_chat.id)
             write_json(userId, data)
             print("Added to watchlist! (by message)")
 
@@ -216,31 +234,11 @@ global set_expected_balance_amount_handler_bool
 set_expected_balance_amount_handler_bool = False
 
 
-def add_semi_admin_handler(update: Update, context: CallbackContext):
-    if is_authorized_user(update.effective_user.id):
-        global add_semi_admin_handler_bool
-        add_semi_admin_handler_bool = True
-        update.message.reply_text("Share contact to add semi admin")
-
-
-def refresh(update: Update, context: CallbackContext):
-    if is_authorized_user(update.effective_user.id):
-        global accountDataSnapshot
-        accountDataSnapshot = get_account_data()
-        global transactionSnapshot 
-        transactionSnapshot = get_all_transaction_data()
-
-
 def get_watchlist_chats(update: Update, context: CallbackContext):
     if is_authorized_user(update.effective_user.id):
         data = get_json(str(update.effective_user.id))
         for chat in data['chats']:
-            if chat.title:
-                update.message.reply_text(f"{chat.title}: {chat.id}")
-            elif chat.username:
-                update.message.reply_text(f"{chat.username}: {chat.id}")
-            else:
-                update.message.reply_text(chat.id)
+            update.message.reply_text(f"{chat}")
 
 
 def remove_watch_list_chat_by_id(update: Update, context: CallbackContext):
@@ -249,9 +247,10 @@ def remove_watch_list_chat_by_id(update: Update, context: CallbackContext):
         try:
             id = update.message.text.split(" ")[1]
             for chat in data["chats"]:
-                if str(chat.id) == str(id):
+                if str(chat) == str(id):
                     data["chats"].remove(chat)
                     update.message.reply_text(f"Removed chat with id: {id}")
+                    write_json(str(update.effective_user.id), data)
                     return
         except: 
             print("couldn't remomve chat from watchlist")
@@ -261,11 +260,30 @@ def remove_watch_list_chat_by_id(update: Update, context: CallbackContext):
 def help_handler(update: Update, context: CallbackContext):
     update.message.reply_text(f"Use /start to start polling the sparebank-api. If you don't have the tokens and id's, follow this guide: https://developer.sparebank1.no/#/documentation/gettingstarted\n\nCOMMANDS:\n\n/balance : See account balance.\n\n/getWatchListChats : Gets all the chats thats on the watchlist\n\n/removeWatchListChatByID : Removes the watchlist chat by given id")
 
+def thread_exist(userId):
+    threadExist = False
+    for thread in threading.enumerate(): 
+        if thread.name == str(userId) + 'balance_polling_loop':
+            threadExist = True
+            break
+    return threadExist
+
+def start_polling_thread(userId):
+    if not thread_exist(userId):
+        pollingThread = threading.Thread(name=str(userId) + 'balance_polling_loop', target=start_balance_polling, args=[userId])
+        pollingThread.start()
+    else:
+        print("Thread for user: " + str(userId) + " already exist")
+
 def start_handler(update: Update, context: CallbackContext):
     try:
+        userId = str(update._effective_user.id)
+        if thread_exist(userId):
+            update.message.reply_text("Thread already exist")
+            return
+
         messageArray = update.message.text.split()
         if len(messageArray) > 7:
-            userId = str(update._effective_user.id)
             payday = int(messageArray[1])
             paydayAmount = int(messageArray[2])
             accessToken = str(messageArray[3])
@@ -275,6 +293,7 @@ def start_handler(update: Update, context: CallbackContext):
             refreshToken = str(messageArray[7])
 
             userObject = {
+                "userId": userId,
                 "payDay": payday,
                 "paydayAmount": paydayAmount,
                 "accountId" : accountId,
@@ -288,19 +307,27 @@ def start_handler(update: Update, context: CallbackContext):
             }
     
             write_json(userId, userObject)
-            pollingThread = threading.Thread(name=userId + 'balance_polling_loop', target=start_balance_polling, args=[userId])
-            pollingThread.start()
+            start_polling_thread(userId)
         else:
             update.message.reply_text("Format message like this:\n/start [payday] [paydayAmount] [accessToken] [accountId] [clientId] [clientSecret] [refreshToken]\n\nIf you don't have the tokens and id's, follow this guide: https://developer.sparebank1.no/#/documentation/gettingstarted")
     except:
         update.message.reply_text("Failed to start")
 
 
-f = open('botConfig.json')
-botConfig = json.load(f)
-f.close()
+def get_bot_config(): 
+    f = open('botConfig.json')
+    botConfig = json.load(f)
+    f.close()
+    return botConfig
 
-updater = Updater(botConfig["apiKey"])
+
+def auto_start_threads():
+    for admin in adminIDs:
+        if get_json(str(admin)) != None:
+            start_polling_thread(str(admin))
+
+
+updater = Updater(get_bot_config()["apiKey"])
 
 updater.dispatcher.add_handler(CommandHandler('balance', balance_handler))
 updater.dispatcher.add_handler(CommandHandler('help', help_handler))
@@ -309,6 +336,8 @@ updater.dispatcher.add_handler(CommandHandler('getWatchListChats', get_watchlist
 updater.dispatcher.add_handler(CommandHandler('removeWatchListChatByID', remove_watch_list_chat_by_id))
 updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'(\S|\s)*'), anything_handler))
 updater.dispatcher.add_handler(MessageHandler(Filters.status_update.new_chat_members, anything_handler))
+
+auto_start_threads()
 
 print("Starting telegram polling...")
 updater.start_polling()
