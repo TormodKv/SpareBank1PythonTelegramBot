@@ -12,7 +12,7 @@ import json
 baseURI = "https://api.sparebank1.no/personal/banking"
 accessTokenUri = "https://api-auth.sparebank1.no/oauth/token"
 adminIDs = [52507774, 1551390] # Change to your own id(s)
-sleepTime = 250
+sleepTime = 200
 
 def start_balance_polling(userId):
 
@@ -33,11 +33,21 @@ def start_balance_polling(userId):
         if refreshAccessToken:
             data = refresh_access_token(userId)
             refreshAccessToken = False
+            time.sleep(20)
         else:
             refreshAccessToken = True
             data = data = get_json(userId)
 
         newAccountData = get_account_data(userId, data)
+
+        #This is totally unnecessary 🤷‍♂️
+        if data["accountDataSnapshot"]["owner"]["age"] != newAccountData["owner"]["age"]:
+            for chat in data["chats"]:
+                try:
+                    send_birthday_message(chat.id, userId, data)
+                except:
+                    print("ERROR: Could not send automatic message to chat")
+
         if newAccountData != False and newAccountData["availableBalance"] != data["accountDataSnapshot"]["availableBalance"]:
             newTransactionData = get_all_transaction_data(userId, data)
             if newTransactionData != False and not is_equal_transaction_lists(newTransactionData, data["transactionSnapshot"]):
@@ -53,13 +63,14 @@ def start_balance_polling(userId):
 
 def is_equal_transaction_lists(o1, o2):
     # Here we can't just compare the objects because every transaction gets a new ID per api call
-    o1Length = len(o1)
-    o2Length = len(o2)
-    o1FirstAmount = o1[0]["amount"]
-    o2FirstAmount = o2[0]["amount"]
-    o1LastAmount = o1[o1Length-1]["amount"]
-    o2LastAmount = o2[o2Length-1]["amount"]
-    return o1Length == o2Length and o1FirstAmount == o2FirstAmount and o1LastAmount == o2LastAmount
+    if len(o1) != len(o2):
+        return False
+
+    for i in range(len(o1)):
+        if o1[i]["amount"] != o2[i]["amount"]:
+            return False
+
+    return True
     
 
 def balance_handler(update: Update, context: CallbackContext) -> None:
@@ -83,20 +94,16 @@ def get_account_data(userId: str, passedData : object | None = None):
     accessToken = data["accessToken"]
 
     try:
-        r : Response = requests.get(f'{baseURI}/accounts/{accountId}', headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v5+json'})
+        r : Response = requests.get(f'{baseURI}/accounts/{accountId}', 
+            headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v5+json; charset=utf-8'}
+        )
+
         print(f"Get account data status: {r.status_code}")
         data = r.json()
         validateTest = data["availableBalance"] > -1
         return data
     except:
         return False
-
-def get_transaction_data(userId):
-    try:
-        return get_all_transaction_data(userId)[0]
-    except:
-        return False
-    
     
 def get_all_transaction_data(userId: str, passedData : object | None = None):
     try:
@@ -104,11 +111,20 @@ def get_all_transaction_data(userId: str, passedData : object | None = None):
         accountId = data["accountId"]
         accessToken = data["accessToken"]
 
-        r : Response = requests.get(f'{baseURI}/transactions?accountKey={accountId}', headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v1+json'})
+        r : Response = requests.get(f'{baseURI}/transactions?accountKey={accountId}', 
+            headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v1+json; charset=utf-8'}
+        )
         print(f"Get transactions status: {r.status_code}")
         data = r.json()
         validateTest = data["transactions"][0]["amount"] > 0
-        return data["transactions"]
+        data = data["transactions"]
+        partions = []
+        interval = len(data)//10
+        i = 0
+        while i + 1 < len(data):
+            partions.append(data[i])
+            i += interval
+        return partions
     except:
         return False
 
@@ -144,6 +160,9 @@ def send_balance_message(chatId, userId: str, passedData : object | None = None)
 
     updater.bot.send_message(chatId, f'`{currentBalanceText}\n{expectedBalanceText}\n\n{lastTransactionText}\n{detailsText}\n`', disable_notification = True, parse_mode = ParseMode.MARKDOWN)
 
+def send_birthday_message(chatId, userId: str, passedData : object | None = None):
+    data = get_json(userId, passedData)
+    updater.bot.send_message(chatId, f'Happy Birthday {data["accountDataSnapshot"]["owner"]["name"]}! 🎈')
 
 def calculate_expected_balance(userId: str, passedData : object | None = None):
 
