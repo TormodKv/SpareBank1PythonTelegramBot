@@ -40,26 +40,29 @@ def start_balance_polling(userId):
 
         newAccountData = get_account_data(userId, data)
 
-        #This is totally unnecessary 🤷‍♂️
-        if data["accountDataSnapshot"]["owner"]["age"] != newAccountData["owner"]["age"]:
-            for chat in data["chats"]:
-                try:
-                    send_birthday_message(chat.id, userId, data)
-                except:
-                    print("ERROR: Could not send automatic message to chat")
+        if newAccountData != False:
 
-        if newAccountData != False and newAccountData["availableBalance"] != data["accountDataSnapshot"]["availableBalance"]:
-            newTransactionData = get_all_transaction_data(userId, data)
-            if newTransactionData != False and not is_equal_transaction_lists(newTransactionData, data["transactionSnapshot"]):
-
-                data["accountDataSnapshot"] = newAccountData
-                data["transactionSnapshot"] = newTransactionData
-                write_json(userId, data)
+            #This is totally unnecessary 🤷‍♂️
+            if data["accountDataSnapshot"]["owner"]["age"] != newAccountData["owner"]["age"]:
                 for chat in data["chats"]:
                     try:
-                        send_balance_message(chat.id, userId, data)
+                        send_birthday_message(chat, userId, data)
                     except:
-                        print("ERROR: Could not send automatic message to chat")
+                        print("ERROR: Could not send automatic birthdaymessage 🎈 to chat: " + str(chat))
+
+            if newAccountData["availableBalance"] != data["accountDataSnapshot"]["availableBalance"]:
+
+                newTransactionData = get_all_transaction_data(userId, data)
+                if newTransactionData != False and not is_equal_transaction_lists(newTransactionData, data["transactionSnapshot"]):
+
+                    data["accountDataSnapshot"] = newAccountData
+                    data["transactionSnapshot"] = newTransactionData
+                    write_json(userId, data)
+                    for chat in data["chats"]:
+                        try:
+                            send_balance_message(chat, userId, data)
+                        except:
+                            print("ERROR: Could not send automatic message to chat: " + str(chat))
 
 def is_equal_transaction_lists(o1, o2):
     # Here we can't just compare the objects because every transaction gets a new ID per api call
