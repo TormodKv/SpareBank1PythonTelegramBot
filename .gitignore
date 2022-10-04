@@ -1,2 +1,3 @@
 response.txt
 *.json
+__pycache__
