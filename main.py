@@ -1,4 +1,7 @@
 import datetime
+import os
+import socket
+import sys
 from requests.models import Response
 from telegram import Update, ParseMode
 import telegram
@@ -16,6 +19,8 @@ sleepTime = 200
 
 def start_balance_polling(userId):
 
+    restartApp = False
+
     # Get fresh refresh token
     data = refresh_access_token(userId)
     refreshAccessToken = False
@@ -27,6 +32,13 @@ def start_balance_polling(userId):
     # Polling loop
     while(True):
         time.sleep(sleepTime)
+
+        if not internet(): 
+            restartApp = True
+            continue
+
+        if restartApp:
+            restart()
 
         data = {}
 
@@ -64,6 +76,10 @@ def start_balance_polling(userId):
                         except:
                             print("ERROR: Could not send automatic message to chat: " + str(chat))
 
+def restart():
+    print("Restarting...")
+    os.execl(sys.executable, os.path.abspath(__file__), *sys.argv)
+
 def is_equal_transaction_lists(o1, o2):
     # Here we can't just compare the objects because every transaction gets a new ID per api call
     if len(o1) != len(o2):
@@ -97,7 +113,7 @@ def get_account_data(userId: str, passedData : object | None = None):
     accessToken = data["accessToken"]
 
     try:
-        r : Response = requests.get(f'{baseURI}/accounts/{accountId}', 
+        r : Response = req("get",f'{baseURI}/accounts/{accountId}', 
             headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v5+json; charset=utf-8'}
         )
 
@@ -114,7 +130,7 @@ def get_all_transaction_data(userId: str, passedData : object | None = None):
         accountId = data["accountId"]
         accessToken = data["accessToken"]
 
-        r : Response = requests.get(f'{baseURI}/transactions?accountKey={accountId}', 
+        r : Response = req("get", f'{baseURI}/transactions?accountKey={accountId}', 
             headers={'Authorization': f'Bearer {accessToken}', 'Accept': 'application/vnd.sparebank1.v1+json; charset=utf-8'}
         )
         print(f"Get transactions status: {r.status_code}")
@@ -140,7 +156,7 @@ def refresh_access_token(userId: str, passedData : object | None = None):
             'refresh_token': data['refreshToken'], 
             'grant_type': 'refresh_token',
         }
-        r : Response = requests.post(accessTokenUri, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=requestBody)
+        r : Response = req("post", accessTokenUri, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=requestBody)
         jsonResponse = r.json()
         data['accessToken'] = jsonResponse["access_token"]
         data['refreshToken'] = jsonResponse["refresh_token"]
@@ -308,11 +324,11 @@ def start_handler(update: Update, context: CallbackContext):
         if len(messageArray) > 7:
             payday = int(messageArray[1])
             paydayAmount = int(messageArray[2])
-            accessToken = str(messageArray[3])
-            accountId = str(messageArray[4])
-            clientId = str(messageArray[5])
-            clientSecret = str(messageArray[6])
-            refreshToken = str(messageArray[7])
+            accessToken = "Not yet initialized" #We don't actually need the access token because we have the refreshtoken 😉
+            accountId = str(messageArray[3])
+            clientId = str(messageArray[4])
+            clientSecret = str(messageArray[5])
+            refreshToken = str(messageArray[6])
 
             userObject = {
                 "userId": userId,
@@ -331,7 +347,7 @@ def start_handler(update: Update, context: CallbackContext):
             write_json(userId, userObject)
             start_polling_thread(userId)
         else:
-            update.message.reply_text("Format message like this:\n/start [payday] [paydayAmount] [accessToken] [accountId] [clientId] [clientSecret] [refreshToken]\n\nIf you don't have the tokens and id's, follow this guide: https://developer.sparebank1.no/#/documentation/gettingstarted")
+            update.message.reply_text("Format message like this:\n/start \n[payday] \n[paydayAmount] \n[accountId] \n[clientId] \n[clientSecret] \n[refreshToken]\n\nIf you don't have the tokens and id's, follow this guide: https://developer.sparebank1.no/#/documentation/gettingstarted")
     except:
         update.message.reply_text("Failed to start")
 
@@ -342,12 +358,30 @@ def get_bot_config():
     f.close()
     return botConfig
 
+def req(method: str = "get", url: str = "", headers: object = {}, data: object = {}):
+    if not internet():
+        return False
+    time.sleep(2) #Might be required. Idk why 🤷‍♂️
+    if method == "get":
+        return requests.get(url, headers=headers, data=data)
+    if method == "post":
+        return requests.post(url, headers=headers, data=data)
+    return False
+
+
+def internet(host="8.8.8.8", port=53, timeout=3):
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error as ex:
+        print("Connection refused. You're offline")
+        return False
 
 def auto_start_threads():
     for admin in adminIDs:
         if get_json(str(admin)) != None:
             start_polling_thread(str(admin))
-
 
 updater = Updater(get_bot_config()["apiKey"])
 
