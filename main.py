@@ -1,4 +1,3 @@
-import datetime
 import os
 import socket
 import sys
@@ -11,6 +10,7 @@ import threading
 import time
 from telegram.ext.filters import Filters
 import json
+from datetime import datetime
 
 baseURI = "https://api.sparebank1.no/personal/banking"
 accessTokenUri = "https://api-auth.sparebank1.no/oauth/token"
@@ -25,12 +25,22 @@ def start_balance_polling(userId):
     data = refresh_access_token(userId)
     refreshAccessToken = False
 
-    data["accountDataSnapshot"] = get_account_data(userId, data)
-    data["transactionSnapshot"] = get_all_transaction_data(userId, data)
+    # Ensure that data is not False and is retrieved correctly
+    data["accountDataSnapshot"] = False
+    data["transactionSnapshot"] = False
+
+    while data["accountDataSnapshot"] == False :
+        data["accountDataSnapshot"] = get_account_data(userId, data)
+        time.sleep(10)
+
+    while data["transactionSnapshot"] == False :
+        data["transactionSnapshot"] = get_all_transaction_data(userId, data)
+        time.sleep(10)
+
     write_json(userId, data)
 
     # Polling loop
-    while(True):
+    while True:
         time.sleep(sleepTime)
 
         if not internet(): 
@@ -52,32 +62,35 @@ def start_balance_polling(userId):
 
         newAccountData = get_account_data(userId, data)
 
-        if newAccountData != False:
+        if newAccountData == False: continue
 
-            #This is totally unnecessary 🤷‍♂️
-            if data["accountDataSnapshot"]["owner"]["age"] != newAccountData["owner"]["age"]:
-                for chat in data["chats"]:
-                    try:
-                        send_birthday_message(chat, userId, data)
-                    except:
-                        print("ERROR: Could not send automatic birthdaymessage 🎈 to chat: " + str(chat))
+        #This is totally unnecessary 🤷‍♂️
+        if data["accountDataSnapshot"]["owner"]["age"] != newAccountData["owner"]["age"]:
+            for chat in data["chats"]:
+                try:
+                    send_birthday_message(chat, userId, data)
+                except:
+                    print("ERROR: Could not send automatic birthdaymessage 🎈 to chat: " + str(chat))
 
-            if newAccountData["availableBalance"] != data["accountDataSnapshot"]["availableBalance"]:
+        if newAccountData["availableBalance"] == data["accountDataSnapshot"]["availableBalance"]: continue
 
-                newTransactionData = get_all_transaction_data(userId, data)
-                if newTransactionData != False and not is_equal_transaction_lists(newTransactionData, data["transactionSnapshot"]):
+        newTransactionData = get_all_transaction_data(userId, data)
 
-                    data["accountDataSnapshot"] = newAccountData
-                    data["transactionSnapshot"] = newTransactionData
-                    write_json(userId, data)
-                    for chat in data["chats"]:
-                        try:
-                            send_balance_message(chat, userId, data)
-                        except:
-                            print("ERROR: Could not send automatic message to chat: " + str(chat))
+        if newTransactionData == False or is_equal_transaction_lists(newTransactionData, data["transactionSnapshot"]): continue
+
+        data["accountDataSnapshot"] = newAccountData
+        data["transactionSnapshot"] = newTransactionData
+        write_json(userId, data)
+        for chat in data["chats"]:
+            try:
+                send_balance_message(chat, userId, data)
+            except:
+                print("ERROR: Could not send automatic message to chat: " + str(chat))
 
 def restart():
-    print("Restarting...")
+    print("----------------------------")
+    print(" - Restarting application - ")
+    print("----------------------------")
     os.execl(sys.executable, os.path.abspath(__file__), *sys.argv)
 
 def is_equal_transaction_lists(o1, o2):
@@ -189,24 +202,24 @@ def calculate_expected_balance(userId: str, passedData : object | None = None):
     payday = data["payDay"]
     paydayAmount = data["paydayAmount"]
 
-    now = datetime.datetime.now()
+    now = datetime.now()
     startYear = now.year
     startMonth = now.month - 1
     if startMonth == 0:
         startMonth = 12
         startYear -= 1
     
-    start = datetime.datetime(startYear, startMonth, payday, 0, 0, 0)
-    end = datetime.datetime(now.year, now.month, payday, 0, 0, 0)
+    start = datetime(startYear, startMonth, payday, 0, 0, 0)
+    end = datetime(now.year, now.month, payday, 0, 0, 0)
 
     if now.day >= payday:
-        start = datetime.datetime(now.year, now.month, payday, 0, 0, 0)
+        start = datetime(now.year, now.month, payday, 0, 0, 0)
         nextmonth = now.month + 1
         year = now.year
         if nextmonth >= 13:
             nextmonth = 1
             year += 1
-        end = datetime.datetime(year, nextmonth, payday, 0, 0, 0)
+        end = datetime(year, nextmonth, payday, 0, 0, 0)
 
     totalSeconds = (end-start).total_seconds()
     partialSeconds = (end-now).total_seconds()
@@ -361,7 +374,7 @@ def get_bot_config():
 def req(method: str = "get", url: str = "", headers: object = {}, data: object = {}):
     if not internet():
         return False
-    time.sleep(2) #Might be required. Idk why 🤷‍♂️
+    time.sleep(5) #Might be required. Idk why 🤷‍♂️
     if method == "get":
         return requests.get(url, headers=headers, data=data)
     if method == "post":
@@ -375,7 +388,7 @@ def internet(host="8.8.8.8", port=53, timeout=3):
         socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
         return True
     except socket.error as ex:
-        print("Connection refused. You're offline")
+        print("Connection refused. You're offline. Time: " + str(datetime.now().strftime("%H:%M:%S  %Y.%m.%d")))
         return False
 
 def auto_start_threads():
