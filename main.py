@@ -161,6 +161,7 @@ def get_all_transaction_data(userId: str, passedData : object | None = None):
         return False
 
 def refresh_access_token(userId: str, passedData : object | None = None):
+    r = {"Message": "Response object initialized"}
     try:
         data = get_json(userId, passedData)
         requestBody = {
@@ -177,7 +178,8 @@ def refresh_access_token(userId: str, passedData : object | None = None):
         print(f"New access token status: {r.status_code}")
         return data
     except:
-        print("Couldn't get refresh token")
+        print("Couldn't get refresh token. \nResponse:")
+        print(r)
 
 def send_balance_message(chatId, userId: str, passedData : object | None = None):
 
